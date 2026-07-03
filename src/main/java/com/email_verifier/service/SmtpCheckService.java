@@ -1,65 +1,58 @@
 package com.email_verifier.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
 
-import java.io.*;
-import java.net.Socket;
 
 @Service
 public class SmtpCheckService {
-    private static final int SMTP_PORT = 25;
-    private static final int TIMEOUT_MS = 5000; // 5 seconds
 
-    public boolean verifyEmail(String email,String mxHosts){
-        // MX Host = Mail Server ka Address
-        if(mxHosts == null) return false;
+    @Value("${abstract.api.key}")
+    private String apiKey;
 
-        // mxHost me trailing dot remove kro
-        mxHosts = mxHosts.endsWith(".")?mxHosts.substring(0,mxHosts.length() -1) : mxHosts;
-        System.out.println("📨 SMTP check: " + mxHosts + " for " + email);
+    private final WebClient webClient;
 
-        try (Socket socket = new Socket()){
-            // SMTP server se connect kro
-            socket.connect(new java.net.InetSocketAddress(mxHosts,SMTP_PORT),TIMEOUT_MS);
-            socket.setSoTimeout(TIMEOUT_MS);
-
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            PrintWriter writer = new PrintWriter(
-                    new OutputStreamWriter(socket.getOutputStream()),true
-            );
-            readResponse(bufferedReader);
-
-            writer.println("HELO emailverifier.com");
-            readResponse(bufferedReader);
-
-            writer.println("MAIL FROM:<verify@emailverifier.com>");
-            String mailFromResp = readResponse(bufferedReader);
-
-            writer.println("RCPT TO:<" + email + ">");
-            String rcptResp = readResponse(bufferedReader);
-
-            writer.println("QUIT");
-
-
-
-            return rcptResp.startsWith("250") || rcptResp.startsWith("251");
-
-        } catch (Exception e) {
-            // ✅ SMTP fail = UNKNOWN nahi = false
-            System.out.println("⚠️ SMTP connect nahi hua: " + e.getMessage());
-            return false;
-        }
-
+    public SmtpCheckService(WebClient.Builder builder) {
+        this.webClient = builder
+                .baseUrl("https://emailvalidation.abstractapi.com")
+                .build();
     }
 
-    private String readResponse(BufferedReader bufferedReader) throws IOException {
-        StringBuilder response = new StringBuilder();
-        String line;
-        while((line = bufferedReader.readLine()) != null){
-            response.append(line);
+    public boolean verifyEmail(String email, String mxHost) {
+        try {
+            String response = webClient.get()
+                    .uri(uri -> uri
+                            .path("/v1/")
+                            .queryParam("api_key", apiKey)
+                            .queryParam("email", email)
+                            .build())
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
 
-            if(line.length() >= 4 && line.charAt(3) == ' ')break;
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(response);
+
+            boolean smtpValid = root
+                    .path("is_smtp_valid")
+                    .path("value")
+                    .asBoolean();
+
+            String deliverability = root
+                    .path("deliverability")
+                    .asText();
+
+            System.out.println("📬 Abstract API: " + deliverability);
+
+            return smtpValid ||
+                    "DELIVERABLE".equals(deliverability);
+
+        } catch (Exception e) {
+            System.out.println("❌ API Error: " + e.getMessage());
+            return false;
         }
-        return response.toString();
     }
 }
