@@ -12,7 +12,7 @@ public class CorsConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**")
                 .allowedOrigins(
                         "http://localhost:5173",
-                        "email-verifier-backend-production.up.railway.app" // ✅ ye add karo
+                        "https://email-verifier-fronted.vercel.app/" // ✅ ye add karo
                 )
                 .allowedMethods("GET", "POST")
                 .allowedHeaders("*");
